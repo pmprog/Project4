@@ -7,18 +7,25 @@
 #include "gameDefines.h"
 
 #include "UnitPlayer.h"
+#include "UnitText.h"
+#include "ScoreNormal.h"
+#include "SpawnNormal.h"
+
+#include "sparrowPrimitives.h"
 
 #define LEVEL_BG_FADE_TIME 2500
 #define LEVEL_PAUSE_FONT_SIZE 32
 
 #define LEVEL_SLOWMO_LEVEL 1
 
-StateLevel::StateLevel( const std::string &filename ) :
+StateLevel::StateLevel( Replay *loadReplay ) :
 	StateBase(),
-	scoreKeeper( this ),
-	spawnHandler( this )
+	__scoreKeeper( this ),
+	__spawnHandler( this )
 {
-	player = new PLAYER_CLASS( this );
+	spawnHandler = &__spawnHandler;
+	scoreKeeper = &__scoreKeeper;
+	player = new UnitPlayer( this );
 	*( player->x ) = APP_SCREEN_WIDTH / 2;
 	*( player->y ) = APP_SCREEN_HEIGHT / 2;
 	addUnit( player, false );
@@ -38,21 +45,22 @@ StateLevel::StateLevel( const std::string &filename ) :
 	bgcol.r = 0;
 	bgcol.g = 0;
 	bgcol.b = 255;
-	bgcol.intensity = 0.50;
+	bgcol.intensity = 0.7;
 
 	pauseScreen = spCreateSurface( APP_SCREEN_WIDTH, APP_SCREEN_HEIGHT );
 
-	run = new Replay();
-	if ( filename[0] != 0 )
+	if ( loadReplay )
 	{
-		if ( !run->loadFromFile( filename ) )
-			errorString = "Could not load replay file!\n" + run->errorString;
+		run = loadReplay;
 		timecode = run->info.timecode;
 	}
 	else
 	{
+		run = new Replay();
 		timecode = time( NULL );
 		run->info.timecode = timecode;
+		run->info.levelType = stLevel;
+		run->info.parameter = "";
 	}
 	Utility::seedRand( timecode );
 
@@ -114,7 +122,7 @@ int StateLevel::update( Uint32 delta )
 
 	delta = std::min( ( int )delta, MAX_DELTA );
 
-	int deltaBkUp = delta;
+	deltaBkUp = delta;
 	if ( slowmo )
 	{
 		if ( slowmoCounter > 0 || ( Utility::sign( LEVEL_SLOWMO_LEVEL ) < 0 && slowmoCounter == 0 ) )
@@ -155,7 +163,7 @@ int StateLevel::update( Uint32 delta )
 	LOG_MESSAGE("Spawn checks");
 
 	// Spawning (creates events)
-	spawnHandler.update( delta );
+	spawnHandler->update( delta );
 
 	units.insert( units.end(), unitQueue.begin(), unitQueue.end() );
 	unitQueue.clear();
@@ -163,7 +171,7 @@ int StateLevel::update( Uint32 delta )
 	LOG_MESSAGE("Score stuff");
 
 	// Score (reads events)
-	scoreKeeper.update( delta );
+	scoreKeeper->update( delta );
 
 	LOG_MESSAGE("Effects");
 
@@ -199,7 +207,7 @@ int StateLevel::update( Uint32 delta )
 
 	if ( player && player->toBeRemoved )
 	{
-		printf( "Score: %i\n", scoreKeeper.getScore() );
+		printf( "YOU DIED! Score: %i\n", scoreKeeper->getScore() );
 		return stScore;
 	}
 
@@ -253,24 +261,29 @@ void StateLevel::render( SDL_Surface *target )
 							I->second.b * I->second.intensity ) );
 	}
 
+	// render text
 	for ( std::vector<UnitBase *>::iterator I = units.begin(); I != units.end(); ++I )
-		( *I )->render( target );
+		if ( ( *I )->flags.has( UnitBase::ufBackground ) )
+			( *I )->render( target );
+	for ( std::vector<UnitBase *>::iterator I = units.begin(); I != units.end(); ++I )
+		if ( !( *I )->flags.has( UnitBase::ufBackground ) )
+			( *I )->render( target );
 
 	if ( player )
 		player->render( target );
 
-	scoreKeeper.render( target );
+	scoreKeeper->render( target );
 
 #ifdef _DEBUG
-	debugString = Utility::numToStr( spGetFPS() ) + " fps\n";
+	debugString = Utility::numToStr( spGetFPS() ) + " fps (" + Utility::numToStr<int>( deltaBkUp ) + ")\n";
 	if ( run->playing )
 		debugString += "frame: " + Utility::numToStr( run->frameCounter ) + " / " + Utility::numToStr( run->totalFrames ) + "\n";
 
 	debugString += Utility::numToStr( units.size() ) + " units\n";
 	if ( debugText )
 		spFontDraw( 5, 5, -1, debugString.c_str(), debugText );
-	spawnHandler.render( target );
 #endif
+	spawnHandler->render( target );
 }
 
 void StateLevel::pauseRender( SDL_Surface *target )
@@ -283,7 +296,9 @@ void StateLevel::pauseRender( SDL_Surface *target )
 
 void StateLevel::addUnit( UnitBase *newUnit, const bool &generateEvent )
 {
+#ifdef _DEBUG
 	printf("%s:%i\t\t%s, type: %i\n",__FILE__,__LINE__,"New unit is being added",newUnit->type);
+#endif
 	if ( generateEvent )
 	{
 		EventUnitSpawn *event = new EventUnitSpawn( newUnit );
@@ -294,7 +309,9 @@ void StateLevel::addUnit( UnitBase *newUnit, const bool &generateEvent )
 
 void StateLevel::addEvent( EventBase *newEvent )
 {
+#ifdef _DEBUG
 	printf("%s:%i\t\t%s, type: %i\n",__FILE__,__LINE__,"New event is being added",newEvent->type);
+#endif
 	eventQueue.push_back( newEvent );
 }
 
@@ -307,8 +324,8 @@ void StateLevel::handleEvents( Uint32 delta )
 
 	for ( std::vector<EventBase *>::iterator event = eventList.begin(); event != eventList.end(); ++event )
 	{
-		scoreKeeper.handleEvent( *event );
-		spawnHandler.handleEvent( *event );
+		scoreKeeper->handleEvent( *event );
+		spawnHandler->handleEvent( *event );
 		switch ( ( *event )->type )
 		{
 		case EventBase::etSlowMotion:
@@ -325,20 +342,56 @@ void StateLevel::handleEvents( Uint32 delta )
 				tempCol.r = 0;
 				tempCol.g = 0;
 				tempCol.b = 255;
+				tempCol.intensity = 0.7;
 				break;
 			case ScoreNormal::smPeace:
 				tempCol.r = 0;
 				tempCol.g = 255;
 				tempCol.b = 0;
+				tempCol.intensity = 0.5;
 				break;
 			case ScoreNormal::smAggression:
 				tempCol.r = 255;
 				tempCol.g = 0;
 				tempCol.b = 0;
+				tempCol.intensity = 0.5;
 				break;
 			}
-			tempCol.intensity = bgcol.intensity;
+			//tempCol.intensity = bgcol.intensity;
 			bgEffects.push_back( std::make_pair(temp,tempCol) );
+			break;
+		}
+		case EventBase::etUnitDeath:
+		{
+			EventUnitDeath *temp = (EventUnitDeath*)*event;
+			if ( temp->points < 0 )
+				break;
+			UnitText *text = new UnitText( this );
+			*(text->x) = *(temp->unit->x);
+			*(text->y) = *(temp->unit->y);
+			text->alignment = UnitText::taCentre;
+			text->fontSize = 24;
+			text->colour1 = -1;
+			text->alpha1 = 128;
+			text->text = "kill +" + Utility::numToStr( temp->points );
+			text->life = 500;
+			text->mode = UnitText::tmStatic;
+			addUnit( text, false );
+			break;
+		}
+		case EventBase::etWaveSkip:
+		{
+			UnitText *text = new UnitText( this );
+			*(text->x) = 400;
+			*(text->y) = 240;
+			text->alignment = UnitText::taCentre;
+			text->fontSize = 24;
+			text->colour1 = -1;
+			text->alpha1 = 128;
+			text->text = "wave skip +" + Utility::numToStr( ((EventWaveSkip*)*event)->timeAmount );
+			text->life = 1000;
+			text->mode = UnitText::tmStatic;
+			addUnit( text, false );
 			break;
 		}
 		default:

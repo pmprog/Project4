@@ -5,6 +5,11 @@
 #include "sparrowCore.h"
 #include "UtilityFunctions.h"
 
+#include "ScoreBase.h"
+#include "UnitPlayer.h"
+
+#include "sparrowPrimitives.h"
+
 #include <time.h>
 
 #define SCORE_FONT_SIZE 32
@@ -24,8 +29,12 @@ StateScore::StateScore( StateLevel *level ) :
 	SDL_BlitSurface( temp, NULL, killFrame, NULL );
 	spSelectRenderTarget( spGetWindowSurface() );
 	spDeleteSurface( temp );
+	if ( level->player->toBeRemoved )
+		playerDead = true;
+	else
+		playerDead = false;
 
-	score = level->scoreKeeper.getScore();
+	score = level->scoreKeeper->getScore();
 	scoreText = spFontLoad( FONT_GENERAL, SCORE_FONT_SIZE );
 	if ( scoreText )
 	{
@@ -33,10 +42,12 @@ StateScore::StateScore( StateLevel *level ) :
 		spFontAdd( scoreText, SP_FONT_GROUP_NUMBERS, spGetRGB( 255, 128, 0 ) );
 	}
 
+	nameBkup[0] = 0;
 	if ( level->run->playing )
 	{
 		state = 1;
 		caret = false;
+		strcpy( nameBkup, name );
 		strcpy( name, level->run->info.name.c_str() );
 		run = level->run;
 		level->run = NULL;
@@ -63,6 +74,8 @@ StateScore::~StateScore()
 	spResetAxisState();
 	spResetButtonsState();
 	delete run;
+	if ( nameBkup[0] != 0 )
+		strcpy( name, nameBkup );
 }
 
 
@@ -116,7 +129,7 @@ void StateScore::render( SDL_Surface *target )
 	SDL_BlitSurface( killFrame, NULL, spGetWindowSurface(), NULL );
 	if ( scoreText )
 	{
-		spFontDrawMiddle( APP_SCREEN_WIDTH / 2, APP_SCREEN_HEIGHT / 2 - SCORE_FONT_SIZE * 2, -1, "You died!", scoreText );
+		spFontDrawMiddle( APP_SCREEN_WIDTH / 2, APP_SCREEN_HEIGHT / 2 - SCORE_FONT_SIZE * 2, -1, playerDead ? "You died!" : "You survived, somehow...", scoreText );
 		spFontDrawMiddle( APP_SCREEN_WIDTH / 2, APP_SCREEN_HEIGHT / 2 - SCORE_FONT_SIZE, -1, ("Score:  " + Utility::numToStr( score )).c_str(), scoreText );
 		if ( run && run->playing )
 			spFontDrawMiddle( APP_SCREEN_WIDTH / 2, APP_SCREEN_HEIGHT / 2 , -1, "Name of this player:", scoreText );
@@ -127,7 +140,10 @@ void StateScore::render( SDL_Surface *target )
 		if ( caret )
 			strcat( temp, "_\0" );
 		spFontDrawMiddle( APP_SCREEN_WIDTH / 2, APP_SCREEN_HEIGHT / 2 + SCORE_FONT_SIZE, -1, temp, scoreText);
-		spFontDrawMiddle( APP_SCREEN_WIDTH / 2, APP_SCREEN_HEIGHT / 2 + SCORE_FONT_SIZE * 3, -1, "Press \""SP_BUTTON_START_NAME"\" to go again...", scoreText );
+		if ( state == 0 )
+			spFontDrawMiddle( APP_SCREEN_WIDTH / 2, APP_SCREEN_HEIGHT / 2 + SCORE_FONT_SIZE * 3, -1, "Press \""SP_BUTTON_START_NAME"\" to confirm name...", scoreText );
+		else
+			spFontDrawMiddle( APP_SCREEN_WIDTH / 2, APP_SCREEN_HEIGHT / 2 + SCORE_FONT_SIZE * 3, -1, "Press \""SP_BUTTON_START_NAME"\" to return to menu...", scoreText );
 	}
 
 }

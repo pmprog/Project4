@@ -6,6 +6,8 @@
 #include "Events.h"
 #include "StateLevel.h"
 
+#include "sparrowPrimitives.h"
+
 #ifdef _DEBUG
 #define DEBUG_VELOCITY_LINE 200.0f
 #define DEBUG_ACCELERATION_LINE 20000.0f
@@ -96,7 +98,7 @@ void UnitBase::render( SDL_Surface *const target )
 
 bool UnitBase::checkCollision( UnitBase const *const other ) const
 {
-	if ( shape->checkCollision( other->shape ) )
+	if ( shape && other->shape && shape->checkCollision( other->shape ) )
 		return true;
 	return false;
 }
